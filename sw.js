@@ -1,6 +1,6 @@
 // Met l'appli en cache pour qu'elle marche sans connexion
 // ⚠️ À CHAQUE MISE À JOUR : changer ce numéro (v1 -> v2 -> v3...)
-const CACHE = "sport-v1";
+const CACHE = "sport-v2";
 const FILES = ["./", "index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png"];
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
