@@ -172,6 +172,22 @@
     <div class="days" id="restDays"></div>
   </div>
   <div class="card">
+    <h2>Voix du coach</h2>
+    <p class="sub">Annonce les séries, ce qu'il reste, le repos et le compte à rebours 3-2-1.</p>
+    <div class="days" style="grid-template-columns:1fr 1fr" id="voiceOnOff">
+      <button data-von="1">🔊 Activée</button><button data-von="0">🔇 Coupée</button>
+    </div>
+    <h2 style="font-size:clamp(15px,4.2vw,18px)">Compter les répétitions</h2>
+    <p class="sub">La voix décompte chaque répétition pendant la série (… 3, 2, 1). Tu appuies quand même sur Done.</p>
+    <div class="days" style="grid-template-columns:repeat(4,1fr)" id="voiceCount">
+      <button data-vc="off">Non</button><button data-vc="lent">Lent</button><button data-vc="normal">Normal</button><button data-vc="rapide">Rapide</button>
+    </div>
+    <label class="sub" for="voiceSel">Voix</label>
+    <select id="voiceSel" style="width:100%;background:#20242d;color:var(--txt);border:1px solid var(--line);border-radius:3vw;padding:3vw;font-size:clamp(14px,3.8vw,16px)"></select>
+    <button class="btn ghost" id="voiceTest">▶ Tester la voix</button>
+    <p class="sub" id="voiceMsg"></p>
+  </div>
+  <div class="card">
     <h2>Ton poids</h2>
     <p class="sub">Sert à estimer les kcal.</p>
     <div class="row" style="justify-content:center">
@@ -312,13 +328,14 @@ function fmtK(k){ return k < 10 ? k.toFixed(1).replace(".",",") : String(Math.ro
 
 // ===================== ÉTAT / SAUVEGARDE =====================
 const KEY = "sport-prog-v1";
-let state = { levels:{pompes:1, squats:1}, history:[], restDays:[], weight:70, updatedAt:0 };
+let state = normalize({ levels:{pompes:1, squats:1}, history:[], restDays:[], weight:70, updatedAt:0 });
 function normalize(s){
   s.levels = s.levels || {pompes:1, squats:1};
   for(const ex in EX){ s.levels[ex] = Math.min(DAYS, Math.max(1, s.levels[ex]||1)); }
   s.history = Array.isArray(s.history) ? s.history : [];
   s.restDays = Array.isArray(s.restDays) ? s.restDays : [];
   s.weight = s.weight || 70;
+  s.voice = Object.assign({ on:true, count:false, pace:"normal", name:"" }, s.voice||{});
   return s;
 }
 function loadLocal(){
@@ -406,12 +423,78 @@ function beep(freq=880, dur=0.15, times=1){
   }catch(e){}
 }
 function buzz(p){ try{ navigator.vibrate && navigator.vibrate(p); }catch(e){} }
-let wakeLock = null;
+// Garder l'écran allumé pendant la séance :
+// 1) Wake Lock (redemandé dès qu'Android le relâche)  2) secours : mini vidéo muette en boucle
+let wakeLock = null, nsVideo = null, awake = false;
+const NOSLEEP_MP4 = "data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAOvbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAB9AAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAtl0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAB9AAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAABAAAAAQAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAfQAAAQAAABAAAAAAJRbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAAAoAAAAUABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAAB/G1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAbxzdGJsAAAAvHN0c2QAAAAAAAAAAQAAAKxhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAABAAEABIAAAASAAAAAAAAAABFUxhdmM2MC4zMS4xMDIgbGlieDI2NAAAAAAAAAAAAAAAGP//AAAAMmF2Y0MBZAAK/+EAF2dkAAqs2V7ARAAAAwAEAAADACg8SJZYAQAEaO+Py/34+AAAAAAQcGFzcAAAAAEAAAABAAAAFGJ0cnQAAAAAAAANAAAADQAAAAAYc3R0cwAAAAAAAAABAAAACgAACAAAAAAUc3RzcwAAAAAAAAABAAAAAQAAAGBjdHRzAAAAAAAAAAoAAAABAAAQAAAAAAEAACgAAAAAAQAAEAAAAAABAAAAAAAAAAEAAAgAAAAAAQAAKAAAAAABAAAQAAAAAAEAAAAAAAAAAQAACAAAAAABAAAQAAAAABxzdHNjAAAAAAAAAAEAAAABAAAACgAAAAEAAAA8c3RzegAAAAAAAAAAAAAACgAAAscAAAANAAAADQAAAA0AAAANAAAADgAAAA8AAAANAAAADQAAAA4AAAAUc3RjbwAAAAAAAAABAAAD3wAAAGJ1ZHRhAAAAWm1ldGEAAAAAAAAAIWhkbHIAAAAAAAAAAG1kaXJhcHBsAAAAAAAAAAAAAAAALWlsc3QAAAAlqXRvbwAAAB1kYXRhAAAAAQAAAABMYXZmNjAuMTYuMTAwAAAACGZyZWUAAANIbWRhdAAAAqwGBf//qNxF6b3m2Ui3lizYINkj7u94MjY0IC0gY29yZSAxNjQgcjMxMDggMzFlMTlmOSAtIEguMjY0L01QRUctNCBBVkMgY29kZWMgLSBDb3B5bGVmdCAyMDAzLTIwMjMgLSBodHRwOi8vd3d3LnZpZGVvbGFuLm9yZy94MjY0Lmh0bWwgLSBvcHRpb25zOiBjYWJhYz0xIHJlZj0xIGRlYmxvY2s9MTotMzotMyBhbmFseXNlPTB4MzoweDMgbWU9aGV4IHN1Ym1lPTIgcHN5PTEgcHN5X3JkPTIuMDA6MC43MCBtaXhlZF9yZWY9MCBtZV9yYW5nZT0xNiBjaHJvbWFfbWU9MSB0cmVsbGlzPTAgOHg4ZGN0PTEgY3FtPTAgZGVhZHpvbmU9MjEsMTEgZmFzdF9wc2tpcD0xIGNocm9tYV9xcF9vZmZzZXQ9MCB0aHJlYWRzPTEgbG9va2FoZWFkX3RocmVhZHM9MSBzbGljZWRfdGhyZWFkcz0wIG5yPTAgZGVjaW1hdGU9MSBpbnRlcmxhY2VkPTAgYmx1cmF5X2NvbXBhdD0wIGNvbnN0cmFpbmVkX2ludHJhPTAgYmZyYW1lcz0zIGJfcHlyYW1pZD0yIGJfYWRhcHQ9MSBiX2JpYXM9MCBkaXJlY3Q9MSB3ZWlnaHRiPTEgb3Blbl9nb3A9MCB3ZWlnaHRwPTEga2V5aW50PTI1MCBrZXlpbnRfbWluPTUgc2NlbmVjdXQ9NDAgaW50cmFfcmVmcmVzaD0wIHJjX2xvb2thaGVhZD0xMCByYz1jcmYgbWJ0cmVlPTEgY3JmPTIzLjAgcWNvbXA9MC42MCBxcG1pbj0wIHFwbWF4PTY5IHFwc3RlcD00IGlwX3JhdGlvPTEuNDAgYXE9MToxLjIwAIAAAAATZYiEABbOf+x/wlV/0QKRHm1/8QAAAAlBmiQYgrnP/vAAAAAJQZ5CQgnnP5yBAAAACQGeYUQSzn+hgAAAAAkBnmNEEs5/oYEAAAAKQZpoNExBPOf+4QAAAAtBnoZFESwTzn+cgQAAAAkBnqVEEs5/oYEAAAAJAZ6nRBLOf6GAAAAACkGaqTRMQSzn/uA=";
 async function keepAwake(on){
+  awake = on;
+  if(on){
+    try{
+      if(navigator.wakeLock && (!wakeLock || wakeLock.released)){
+        wakeLock = await navigator.wakeLock.request("screen");
+        wakeLock.addEventListener("release", ()=>{ wakeLock = null; });
+      }
+    }catch(e){ wakeLock = null; }
+    try{
+      if(!nsVideo){
+        nsVideo = document.createElement("video");
+        nsVideo.setAttribute("playsinline",""); nsVideo.setAttribute("muted","");
+        nsVideo.muted = true; nsVideo.loop = true; nsVideo.src = NOSLEEP_MP4;
+        nsVideo.style.cssText = "position:fixed;left:0;top:0;width:1px;height:1px;opacity:0.01;pointer-events:none";
+        document.body.appendChild(nsVideo);
+      }
+      if(nsVideo.paused) nsVideo.play().catch(()=>{});
+    }catch(e){}
+  } else {
+    try{ if(wakeLock) await wakeLock.release(); }catch(e){}
+    wakeLock = null;
+    try{ if(nsVideo) nsVideo.pause(); }catch(e){}
+  }
+}
+
+// ===================== VOIX (coach) =====================
+// Voix du téléphone (synthèse vocale Android) : marche hors ligne si la voix française est installée.
+const PACE = { lent:3.0, normal:2.2, rapide:1.6 }; // secondes par répétition
+let voices = [];
+function loadVoices(){ try{ voices = speechSynthesis.getVoices().filter(v=>/^fr/i.test(v.lang)); }catch(e){ voices = []; } }
+try{ loadVoices(); speechSynthesis.onvoiceschanged = ()=>{ loadVoices(); if(tab==="settings") renderSettings(); }; }catch(e){}
+function pickVoice(){
+  if(!voices.length) return null;
+  return voices.find(v=>v.name===state.voice.name)
+      || voices.find(v=>v.localService && /fr-FR/i.test(v.lang))
+      || voices.find(v=>/fr-FR/i.test(v.lang)) || voices[0];
+}
+function voiceOn(){ return state.voice.on && "speechSynthesis" in window; }
+function say(text, interrupt=true){
+  if(!voiceOn()) return;
   try{
-    if(on && navigator.wakeLock && !wakeLock) wakeLock = await navigator.wakeLock.request("screen");
-    if(!on && wakeLock){ await wakeLock.release(); wakeLock = null; }
+    if(interrupt) speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    const v = pickVoice(); if(v){ u.voice = v; u.lang = v.lang; } else u.lang = "fr-FR";
+    u.rate = 1.05; u.pitch = 1; u.volume = 1;
+    speechSynthesis.speak(u);
   }catch(e){}
+}
+function plural(n, ex){ return n + " " + (n>1 ? EX[ex].unit : EX[ex].unit.replace(/s$/,"")); }
+// compte des répétitions à voix haute (optionnel)
+let repTimer = null;
+function stopCount(){ clearInterval(repTimer); repTimer = null; }
+function startCount(){
+  stopCount();
+  if(!voiceOn() || !state.voice.count || !cur) return;
+  const n = cur.sets[cur.i]; let left = n;
+  const step = (PACE[state.voice.pace]||2.2) * 1000;
+  setTimeout(()=>{
+    if(!cur) return;
+    repTimer = setInterval(()=>{
+      if(!cur){ stopCount(); return; }
+      left--;
+      $("wNum").textContent = Math.max(left,0);
+      if(left > 0) say(String(left));
+      else { say("Terminé ! Appuie sur Done."); stopCount(); }
+    }, step);
+  }, 1800); // laisse le temps d'annoncer la série
 }
 function confirmBox(title, text, onYes){
   $("mTitle").textContent = title; $("mText").textContent = text;
@@ -555,7 +638,23 @@ $("period").addEventListener("click", e=>{
 });
 
 // ===================== RÉGLAGES =====================
+function renderVoice(){
+  const v = state.voice;
+  document.querySelectorAll("[data-von]").forEach(b=>b.classList.toggle("on", (b.dataset.von==="1")===v.on));
+  const cnt = v.count ? v.pace : "off";
+  document.querySelectorAll("[data-vc]").forEach(b=>b.classList.toggle("on", b.dataset.vc===cnt));
+  const sel = $("voiceSel");
+  if(!("speechSynthesis" in window)){ $("voiceMsg").textContent = "La synthèse vocale n'est pas disponible sur ce navigateur."; sel.innerHTML=""; return; }
+  const cur = pickVoice();
+  sel.innerHTML = voices.length
+    ? voices.map(x=>`<option value="${x.name.replace(/"/g,"&quot;")}" ${cur&&x.name===cur.name?"selected":""}>${x.name}${x.localService?"":" (en ligne)"}</option>`).join("")
+    : `<option>Voix française par défaut</option>`;
+  $("voiceMsg").textContent = voices.length && !voices.some(x=>x.localService)
+    ? "Pour la voix sans internet : Paramètres Android → Synthèse vocale → installer la voix française."
+    : "";
+}
 function renderSettings(){
+  renderVoice();
   $("restDays").innerHTML = WD.map((d,i)=>`<button data-rd="${i}" class="${state.restDays.includes(i)?'on':''}">${d}</button>`).join("");
   $("weight").textContent = state.weight + " kg";
   $("lvlAdjust").innerHTML = Object.keys(EX).map(ex=>`
@@ -567,6 +666,15 @@ function renderSettings(){
       </div></div>`).join("");
 }
 $("settings").addEventListener("click", e=>{
+  const von = e.target.closest("[data-von]");
+  if(von){ state.voice.on = von.dataset.von==="1"; if(!state.voice.on) try{speechSynthesis.cancel();}catch(x){} save(); renderVoice(); return; }
+  const vc = e.target.closest("[data-vc]");
+  if(vc){ if(vc.dataset.vc==="off") state.voice.count=false; else { state.voice.count=true; state.voice.pace=vc.dataset.vc; } save(); renderVoice(); return; }
+  if(e.target.closest("#voiceTest")){
+    const was = state.voice.on; state.voice.on = true;
+    say("Série 1 sur 5 : 12 pompes. Trois, deux, un, c'est parti !");
+    state.voice.on = was; return;
+  }
   const rd = e.target.closest("[data-rd]");
   if(rd){
     const i = +rd.dataset.rd;
@@ -586,6 +694,8 @@ $("resetBtn").addEventListener("click", ()=>confirmBox("Tout remettre à zéro ?
   state = normalize({ levels:{pompes:1,squats:1}, history:[], restDays:state.restDays, weight:state.weight });
   save(); renderAll(); show("home");
 }));
+
+$("voiceSel").addEventListener("change", e=>{ state.voice.name = e.target.value; save(); });
 
 // sauvegarde de secours (code texte)
 function encodeSave(){ return "SPORT1:" + btoa(unescape(encodeURIComponent(JSON.stringify(state)))); }
@@ -618,6 +728,14 @@ function start(ex){
   cur = { ex, day, ...session(ex,day), i:0 };
   keepAwake(true);
   showSet();
+  announceSet(true);
+}
+function announceSet(first){
+  const n = cur.sets[cur.i], last = cur.i === cur.sets.length-1;
+  const head = first ? "C'est parti ! " : "";
+  if(last) say(head + "Dernière série : " + plural(n, cur.ex) + ". Allez !");
+  else say(head + "Série " + (cur.i+1) + " sur " + cur.sets.length + " : " + plural(n, cur.ex) + ".");
+  startCount();
 }
 function drawDots(id){
   $(id).innerHTML = cur.sets.map((n,k)=>`<div class="dot ${k<cur.i?'done':''} ${k===cur.i?'cur':''}">${n}</div>`).join("");
@@ -633,9 +751,12 @@ function showSet(){
   show("work");
 }
 $("doneBtn").addEventListener("click", ()=>{
-  buzz(40);
+  buzz(40); stopCount();
   cur.i++;
   if(cur.i >= cur.sets.length){ finish(); return; }
+  keepAwake(true);
+  const left = cur.sets.slice(cur.i).reduce((a,b)=>a+b,0);
+  say("Bien joué ! Plus que " + plural(left, cur.ex) + ". Repos, " + REST + " secondes.");
   startRest();
 });
 function startRest(){
@@ -648,7 +769,14 @@ function startRest(){
   timer = setInterval(()=>{
     restLeft = Math.max(0, Math.ceil((cur.endAt - Date.now())/1000));
     tick();
-    if(restLeft <= 3 && restLeft > 0 && restLeft !== cur.lastBeep){ cur.lastBeep = restLeft; beep(660,0.08); }
+    if(restLeft !== cur.lastBeep){
+      cur.lastBeep = restLeft;
+      if(voiceOn()){
+        if(restLeft === 30 && restTotal > 35) say("30 secondes.");
+        else if(restLeft === 10) say("10 secondes. Prépare-toi.");
+        else if(restLeft <= 3 && restLeft > 0) say(String(restLeft));
+      } else if(restLeft <= 3 && restLeft > 0) beep(660,0.08);
+    }
     if(restLeft <= 0) endRest();
   }, 200);
 }
@@ -659,17 +787,22 @@ function tick(){
 }
 function endRest(){
   clearInterval(timer); timer=null;
-  beep(990,0.2,2); buzz([200,100,200]);
+  if(!voiceOn()) beep(990,0.2,2);
+  buzz([200,100,200]);
+  keepAwake(true);
   showSet();
+  announceSet(false);
 }
 $("skip").addEventListener("click", endRest);
 $("plus15").addEventListener("click", ()=>{
+  keepAwake(true);
   cur.endAt += 15000; restTotal += 15;
   restLeft = Math.ceil((cur.endAt - Date.now())/1000); tick();
 });
 function finish(){
-  clearInterval(timer); keepAwake(false);
-  beep(1200,0.25,3);
+  clearInterval(timer); stopCount(); keepAwake(false);
+  if(voiceOn()) say("Séance terminée, bravo ! " + plural(cur.total, cur.ex) + ", environ " + Math.round(kcal(cur.ex, cur.total)) + " kilocalories.");
+  else beep(1200,0.25,3);
   $("eSum").textContent = cur.total + " " + EX[cur.ex].unit + " en 5 séries (" + cur.sets.join("-") + ")";
   $("eKcal").textContent = "≈ " + fmtK(kcal(cur.ex, cur.total)) + " kcal";
   show("end");
@@ -684,9 +817,11 @@ document.querySelectorAll("[data-fb]").forEach(b=>b.addEventListener("click", ()
 }));
 document.querySelectorAll(".quit").forEach(b=>b.addEventListener("click", ()=>confirmBox(
   "Arrêter la séance ?", "Elle ne sera pas comptée et ton avancement ne change pas.", ()=>{
-    clearInterval(timer); timer=null; keepAwake(false); cur=null; renderHome(); show("home");
+    clearInterval(timer); timer=null; stopCount(); try{ speechSynthesis.cancel(); }catch(e){} keepAwake(false); cur=null; renderHome(); show("home");
   })));
-document.addEventListener("visibilitychange", ()=>{ if(!document.hidden && cur) keepAwake(true); });
+document.addEventListener("visibilitychange", ()=>{ if(!document.hidden && awake) keepAwake(true); });
+// tout appui pendant la séance redemande l'écran allumé (Android exige un geste)
+document.addEventListener("pointerdown", ()=>{ if(awake) keepAwake(true); }, true);
 
 // ===================== DÉMARRAGE =====================
 // Mode hors ligne : service worker + stockage persistant
